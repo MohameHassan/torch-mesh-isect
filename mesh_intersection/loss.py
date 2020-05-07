@@ -200,7 +200,7 @@ def conical_distance_field(triangle_points, cone_center, cone_radius,
 
 class DistanceFieldPenetrationLoss(nn.Module):
     def __init__(self, sigma=0.5, point2plane=False, vectorized=True,
-                 penalize_outside=True, linear_max=1000):
+                 penalize_outside=True, linear_max=1000, bi_directional=True):
         super(DistanceFieldPenetrationLoss, self).__init__()
         self.sigma = sigma
         self.point2plane = point2plane
@@ -281,15 +281,16 @@ class DistanceFieldPenetrationLoss(nn.Module):
         # For each batch element, for each collision pair, 3 distance values
         # for the vertices of the intruding triangle
         # Same as above, but now the receiver is the "intruder".
-        phi_intruders = conical_distance_field(
-            recv_triangles,
-            intr_circumcenter,
-            intr_circumradius,
-            intr_normals,
-            sigma=self.sigma,
-            vectorized=self.vectorized,
-            penalize_outside=self.penalize_outside,
-            linear_max=self.linear_max)
+        if self.bi_directional:
+            phi_intruders = conical_distance_field(
+                recv_triangles,
+                intr_circumcenter,
+                intr_circumradius,
+                intr_normals,
+                sigma=self.sigma,
+                vectorized=self.vectorized,
+                penalize_outside=self.penalize_outside,
+                linear_max=self.linear_max)
 
         receiver_loss = torch.tensor(0, device=triangles.device,
                                      dtype=torch.float32)
@@ -303,15 +304,18 @@ class DistanceFieldPenetrationLoss(nn.Module):
             receiver_loss = torch.norm(-phi_receivers.unsqueeze(dim=-1) *
                                        intr_normals.unsqueeze(dim=-2), p=2,
                                        dim=-1).pow(2).sum(dim=-1)
-            intruder_loss = torch.norm(-phi_intruders.unsqueeze(dim=-1) *
-                                       recv_normals.unsqueeze(dim=-2), p=2,
-                                       dim=-1).pow(2).sum(dim=-1)
+            if self.bi_directional:
+                intruder_loss = torch.norm(-phi_intruders.unsqueeze(dim=-1) *
+                                           recv_normals.unsqueeze(dim=-2), p=2,
+                                           dim=-1).pow(2).sum(dim=-1)
 
         batch_ind = torch.arange(0, batch_size, dtype=batch_idxs.dtype,
                                  device=triangles.device).unsqueeze(dim=1)
         batch_mask = batch_ind.repeat([1, num_collisions]).eq(batch_idxs)\
             .to(receiver_loss.dtype)
-
-        loss = torch.matmul(batch_mask, receiver_loss) + \
-            torch.matmul(batch_mask, intruder_loss)
+        if self.bi_directional:
+            loss = torch.matmul(batch_mask, receiver_loss) + \
+                torch.matmul(batch_mask, intruder_loss)
+        else:
+            loss = torch.matmul(batch_mask, receiver_loss)
         return loss
