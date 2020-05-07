@@ -207,6 +207,7 @@ class DistanceFieldPenetrationLoss(nn.Module):
         self.vectorized = vectorized
         self.penalize_outside = penalize_outside
         self.linear_max = linear_max
+        self.bi_directional = bi_directional
 
     def forward(self, triangles, collision_idxs):
         '''
